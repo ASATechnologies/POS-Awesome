@@ -59,49 +59,22 @@
         </v-col>
       </v-row>
       <v-row align="center" class="items px-2 py-1 mt-0 pt-0" v-if="pos_profile.posa_allow_change_posting_date">
-  <!-- Posting Date Field -->
-  <v-col cols="6" class="pb-2">
-    <v-menu
-      ref="invoice_posting_date"
-      v-model="invoice_posting_date"
-      :close-on-content-click="false"
-      transition="scale-transition"
-      density="default"
-    >
-      <template v-slot:activator="{ props }">
-        <v-text-field
-          v-model="posting_date"
-          :label="frappe._('Posting Date')"
-          readonly
-          variant="outlined"
-          density="compact"
-          bg-color="white"
-          clearable
-          color="primary"
-          hide-details
-          v-bind="props"
-        ></v-text-field>
-      </template>
-      <v-date-picker
-        v-model="posting_date"
-        no-title
-        scrollable
-        color="primary"
-        :min="frappe.datetime.add_days(frappe.datetime.nowdate(true), -7)"
-        :max="frappe.datetime.add_days(frappe.datetime.nowdate(true), 7)"
-        @input="invoice_posting_date = false"
-      ></v-date-picker>
-    </v-menu>
-  </v-col>
-
-  <!-- Balance Field -->
-  <v-col v-if="pos_profile.posa_show_customer_balance" cols="6" class="pb-2 d-flex align-center">
-  <div class="balance-field">
-    <strong>Balance:</strong>
-    <span class="balance-value">{{ formatCurrency(customer_balance) }}</span>
-  </div>
-</v-col>
-</v-row>
+        <v-col cols="6" class="pb-2">
+          <PostingDate
+            v-model="posting_date"
+            :min-date="frappe.datetime.add_days(frappe.datetime.nowdate(true), -7)"
+            :max-date="frappe.datetime.add_days(frappe.datetime.nowdate(true), 7)"
+            @update:model-value="updatePostingDate"
+          />
+        </v-col>
+        <!-- Balance Field -->
+        <v-col v-if="pos_profile.posa_show_customer_balance" cols="6" class="pb-2 d-flex align-center">
+        <div class="balance-field">
+          <strong>Balance:</strong>
+          <span class="balance-value">{{ formatCurrency(customer_balance) }}</span>
+        </div>
+      </v-col>
+      </v-row>
       <div class="my-0 py-0 overflow-y-auto" style="max-height: 60vh">
         <v-data-table :headers="items_headers" :items="items" v-model:expanded="expanded" show-expand
           item-value="posa_row_id" class="elevation-1" :items-per-page="itemsPerPage" expand-on-click
@@ -428,6 +401,7 @@
 
 import format from "../../format";
 import Customer from "./Customer.vue";
+import PostingDate from "./PostingDate.vue";
 
 export default {
   mixins: [format],
@@ -482,6 +456,7 @@ export default {
 
   components: {
     Customer,
+    PostingDate,
   },
 
   computed: {
@@ -2584,6 +2559,11 @@ export default {
         this.delivery_charges_rate = 0;
       }
     },
+    updatePostingDate(date) {
+      if (!date) return;
+      this.posting_date = date;
+      this.$forceUpdate();
+    },
   },
 
   mounted() {
@@ -2718,24 +2698,28 @@ export default {
         this.additional_discount_percentage = 0;
       }
     },
-	posting_date(newVal) {
-    if (!newVal) return;
-
-    // newVal is a Date object, shift it to local midnight:
-    const localDate = new Date(
-      newVal.getFullYear(),
-      newVal.getMonth(),
-      newVal.getDate()
-    );
-
-    // "YYYY-MM-DD" string
-    const year  = localDate.getFullYear();
-    const month = String(localDate.getMonth() + 1).padStart(2, "0");
-    const day   = String(localDate.getDate()).padStart(2, "0");
-
-    // Change Date To String Only
-    this.posting_date = `${year}-${month}-${day}`;
-  },
+	posting_date: {
+      handler(newVal) {
+        if (!newVal) return;
+        // Make sure the date is in YYYY-MM-DD format
+        if (typeof newVal === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(newVal)) {
+          return; // Already in correct format
+        }
+        
+        let dateStr;
+        if (newVal instanceof Date) {
+          const year = newVal.getFullYear();
+          const month = String(newVal.getMonth() + 1).padStart(2, '0');
+          const day = String(newVal.getDate()).padStart(2, '0');
+          dateStr = `${year}-${month}-${day}`;
+        } else {
+          dateStr = frappe.datetime.nowdate();
+        }
+        
+        this.posting_date = dateStr;
+      },
+      immediate: true
+    },
   },
 };
 </script>
@@ -2759,10 +2743,48 @@ export default {
 }
 
 .balance-value {
-  font-size: 1.5rem; /* Larger font size */
-  font-weight: bold; /* Bold text */
-  color: #d32f2f; /* Red color for balance value */
-  margin-left: 5px; /* Add spacing between label and value */
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #d32f2f;
+  margin-left: 5px;
 }
 
+/* Add these new styles for date picker buttons */
+.v-date-picker .v-btn {
+  min-width: 80px !important;
+  margin: 0 4px !important;
+  text-transform: none !important;
+  font-weight: 500 !important;
+}
+
+.v-date-picker .v-btn--variant-text {
+  padding: 0 12px !important;
+}
+
+.v-date-picker .v-spacer {
+  flex: 1 1 auto !important;
+}
+
+/* Updated date picker button styles */
+.date-action-btn {
+  min-width: 64px !important;
+  height: 36px !important;
+  margin: 4px !important;
+  padding: 0 16px !important;
+  text-transform: none !important;
+  font-weight: 500 !important;
+  font-size: 14px !important;
+  letter-spacing: 0.25px !important;
+}
+
+.v-date-picker {
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+}
+
+.v-date-picker .v-card-actions {
+  padding: 8px !important;
+  border-top: 1px solid rgba(0,0,0,0.12);
+}
 </style>
