@@ -1029,7 +1029,7 @@ export default {
 
       // Proceed to submit the invoice
       this.submit_invoice(print);
-    }
+    },
     // Submit invoice to backend after all validations
     submit_invoice(print) {
       // For return invoices, ensure payments are negative one last time
