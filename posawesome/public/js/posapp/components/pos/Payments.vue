@@ -920,9 +920,8 @@ export default {
         return;
       }
 
-      // Skip Cash validation if Credit Card is selected
-      if (this.paymentMethod !== 'credit_card') {
-        // Validate cash payments when credit sale is off
+      // Cash validation should happen only if 'cash' is selected as payment method
+      if (this.paymentMethod === 'cash') {
         let has_cash_payment = false;
         let cash_amount = 0;
         this.invoice_doc.payments.forEach((payment) => {
