@@ -902,12 +902,12 @@ export default {
         }
       });
     },
-    // Submit payment after validation
     submit(event, payment_received = false, print = false) {
       // For return invoices, ensure payment amounts are negative
       if (this.invoice_doc.is_return) {
         this.ensureReturnPaymentsAreNegative();
       }
+
       // Validate total payments only if not credit sale and invoice total is not zero
       if (!this.is_credit_sale && !this.invoice_doc.is_return && 
           this.total_payments <= 0 && 
@@ -919,8 +919,10 @@ export default {
         frappe.utils.play_sound("error");
         return;
       }
-      // Validate cash payments when credit sale is off
-      if (!this.is_credit_sale && !this.invoice_doc.is_return) {
+
+      // Skip Cash validation if Credit Card is selected
+      if (this.paymentMethod !== 'credit_card') {
+        // Validate cash payments when credit sale is off
         let has_cash_payment = false;
         let cash_amount = 0;
         this.invoice_doc.payments.forEach((payment) => {
@@ -929,6 +931,7 @@ export default {
             cash_amount = this.flt(payment.amount);
           }
         });
+
         if (has_cash_payment) {
           if (!this.pos_profile.posa_allow_partial_payment && 
               cash_amount < (this.invoice_doc.rounded_total || this.invoice_doc.grand_total) &&
@@ -942,6 +945,7 @@ export default {
           }
         }
       }
+
       // Validate partial payments only if not credit sale and invoice total is not zero
       if (
         !this.is_credit_sale &&
@@ -956,6 +960,7 @@ export default {
         frappe.utils.play_sound("error");
         return;
       }
+
       // Validate phone payment
       let phone_payment_is_valid = true;
       if (!payment_received) {
@@ -976,6 +981,7 @@ export default {
           return;
         }
       }
+
       // Validate paid_change
       if (this.paid_change > -this.diff_payment) {
         this.eventBus.emit("show_message", {
@@ -985,6 +991,7 @@ export default {
         frappe.utils.play_sound("error");
         return;
       }
+
       // Validate cashback
       let total_change = this.flt(this.flt(this.paid_change) + this.flt(-this.credit_change));
       if (this.is_cashback && total_change !== -this.diff_payment) {
@@ -995,6 +1002,7 @@ export default {
         frappe.utils.play_sound("error");
         return;
       }
+
       // Validate customer credit redemption
       let credit_calc_check = this.customer_credit_dict.filter((row) => {
         return this.flt(row.credit_to_redeem) > this.flt(row.total_credit);
@@ -1018,9 +1026,10 @@ export default {
         frappe.utils.play_sound("error");
         return;
       }
+
       // Proceed to submit the invoice
       this.submit_invoice(print);
-    },
+    }
     // Submit invoice to backend after all validations
     submit_invoice(print) {
       // For return invoices, ensure payments are negative one last time
