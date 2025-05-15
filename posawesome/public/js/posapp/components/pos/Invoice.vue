@@ -74,7 +74,8 @@
             density="default">
             <template v-slot:activator="{ props }">
               <v-text-field v-model="formatted_posting_date" :label="frappe._('Posting Date')" readonly
-                variant="outlined" density="compact" clearable color="primary" hide-details
+                variant="solo" density="compact" clearable color="primary" hide-details
+                prepend-inner-icon="mdi-calendar"
                 v-bind="props"></v-text-field>
             </template>
             <v-date-picker v-model="posting_date" no-title scrollable color="primary"
@@ -115,7 +116,7 @@
       </v-row>
 
       <!-- Items Table Section (Main items list for invoice) -->
-      <div class="my-0 py-0 overflow-y-auto" style="max-height: calc(70vh - 180px)">
+      <div class="my-0 py-0 overflow-y-auto mt-3" style="max-height: calc(70vh - 180px)">
         <!-- Main Items Data Table -->
         <v-data-table 
           :headers="items_headers" 
@@ -239,14 +240,10 @@
                 <v-col cols="12" sm="4">
                   <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Discount Amount')"
                     bg-color="white" hide-details :model-value="formatCurrency(item.discount_amount || 0)" ref="discount"
-                    @input="(value) => {
-                      if (expanded.length > 0) {
-                        const selectedItem = items.find(i => i.posa_row_id === expanded[0].posa_row_id);
-                        if (selectedItem) {
-                          calc_prices(selectedItem, value, { target: { id: 'discount_amount' } });
-                        }
-                      }
-                    }" :rules="['isNumber']" id="discount_amount" disabled :prefix="currencySymbol(pos_profile.currency)"></v-text-field>
+                    @change="(event) => { if (expanded && expanded.length === 1 && expanded[0] === item.posa_row_id) { calc_prices(item, event.target.value, { target: { id: 'discount_amount' } }); } }" 
+                    :rules="['isNumber']" id="discount_amount" 
+                    :disabled="!!item.posa_is_replace || item.posa_offer_applied || !pos_profile.posa_allow_user_to_edit_item_discount || (invoiceType === 'Return' && invoice_doc.return_against)" 
+                    :prefix="currencySymbol(pos_profile.currency)"></v-text-field>
                 </v-col>
 
                 <!-- Third Row -->
@@ -358,13 +355,13 @@
             <!-- Total Qty -->
             <v-col cols="6">
               <v-text-field :model-value="formatFloat(total_qty)" :label="frappe._('Total Qty')"
-                prepend-inner-icon="mdi-format-list-numbered" variant="outlined" density="compact" readonly
+                prepend-inner-icon="mdi-format-list-numbered" variant="solo" density="compact" readonly
                 color="accent" />
             </v-col>
             <!-- Additional Discount (Amount or Percentage) -->
             <v-col cols="6" v-if="!pos_profile.posa_use_percentage_discount">
               <v-text-field v-model="additional_discount" :label="frappe._('Additional Discount')"
-                prepend-inner-icon="mdi-cash-minus" variant="outlined" density="compact" color="warning"
+                prepend-inner-icon="mdi-cash-minus" variant="solo" density="compact" color="warning"
                 :prefix="currencySymbol(pos_profile.currency)"
                 :disabled="!pos_profile.posa_allow_user_to_edit_additional_discount" />
             </v-col>
@@ -372,7 +369,7 @@
             <v-col cols="6" v-else>
               <v-text-field v-model="additional_discount_percentage" @change="update_discount_umount()"
                 :rules="[isNumber]" :label="frappe._('Additional Discount %')" suffix="%"
-                prepend-inner-icon="mdi-percent" variant="outlined" density="compact" color="warning"
+                prepend-inner-icon="mdi-percent" variant="solo" density="compact" color="warning"
                 :disabled="!pos_profile.posa_allow_user_to_edit_additional_discount || !!discount_percentage_offer_name" />
             </v-col>
 
@@ -380,13 +377,13 @@
             <v-col cols="6">
               <v-text-field :model-value="formatCurrency(total_items_discount_amount)"
                 :prefix="currencySymbol(displayCurrency)" :label="frappe._('Items Discounts')" 
-                prepend-inner-icon="mdi-tag-minus" variant="outlined" density="compact" color="warning" readonly />
+                prepend-inner-icon="mdi-tag-minus" variant="solo" density="compact" color="warning" readonly />
             </v-col>
 
             <!-- Total (moved to maintain row alignment) -->
             <v-col cols="6">
               <v-text-field :model-value="formatCurrency(subtotal)" :prefix="currencySymbol(displayCurrency)"
-                :label="frappe._('Total')" prepend-inner-icon="mdi-cash" variant="outlined" density="compact" readonly
+                :label="frappe._('Total')" prepend-inner-icon="mdi-cash" variant="solo" density="compact" readonly
                 color="success" />
             </v-col>
           </v-row>
@@ -2126,21 +2123,35 @@ export default {
             break;
 
           case "discount_amount":
+            console.log("[calc_prices] Event Target ID:", fieldId);
+            console.log("[calc_prices] RAW value received by function:", value); // <-- ADDED THIS
+            console.log("[calc_prices] Original item.price_list_rate:", item.price_list_rate);
+            console.log("[calc_prices] Converted price_list_rate for calc:", converted_price_list_rate);
+            console.log("[calc_prices] Input value (newValue before Math.min):", newValue);
+
             // Ensure discount amount doesn't exceed price list rate
             newValue = Math.min(newValue, converted_price_list_rate);
+            console.log("[calc_prices] Input value (newValue after Math.min):", newValue);
 
             // Store base discount and convert to selected currency
             item.base_discount_amount = this.flt(newValue * this.exchange_rate, this.currency_precision);
             item.discount_amount = newValue;
+            console.log("[calc_prices] Updated item.discount_amount:", item.discount_amount);
+            console.log("[calc_prices] Updated item.base_discount_amount:", item.base_discount_amount);
 
             // Update rate based on discount
             item.rate = this.flt(converted_price_list_rate - item.discount_amount, this.currency_precision);
             item.base_rate = this.flt(item.price_list_rate - item.base_discount_amount, this.currency_precision);
+            console.log("[calc_prices] Calculated item.rate:", item.rate);
+            console.log("[calc_prices] Calculated item.base_rate:", item.base_rate);
 
             // Calculate percentage
             if (converted_price_list_rate) {
               item.discount_percentage = this.flt((item.discount_amount / converted_price_list_rate) * 100, this.float_precision);
+            } else {
+              item.discount_percentage = 0; // Avoid division by zero
             }
+            console.log("[calc_prices] Calculated item.discount_percentage:", item.discount_percentage);
             break;
 
           case "discount_percentage":
