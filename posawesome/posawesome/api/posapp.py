@@ -31,6 +31,7 @@ from posawesome.posawesome.doctype.delivery_charges.delivery_charges import (
     get_applicable_delivery_charges as _get_applicable_delivery_charges,
 )
 from frappe.utils.caching import redis_cache
+from typing import List, Dict
 
 
 @frappe.whitelist()
@@ -2234,4 +2235,30 @@ def get_available_currencies():
     """Get list of available currencies from ERPNext"""
     return frappe.get_all("Currency", fields=["name", "currency_name"], 
                          filters={"enabled": 1}, order_by="currency_name")
-    
+
+
+
+
+@frappe.whitelist()
+def get_app_info() -> Dict[str, List[Dict[str, str]]]:
+    """
+    Return a list of installed apps and their versions,
+    as recorded in the Installed Application DocType.
+    """
+    # Fetch raw records from the DocType
+    app_records = frappe.get_all(
+        "Installed Application",
+        fields=["app_name", "app_version"],
+        order_by="app_name asc"
+    )
+
+    # Transform into the shape your API expects
+    apps_info = [
+        {
+            "app_name": record["app_name"],
+            "installed_version": record["app_version"]
+        }
+        for record in app_records
+    ]
+
+    return {"apps": apps_info}

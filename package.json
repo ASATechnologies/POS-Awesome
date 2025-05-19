@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "dev": "vite"
+  },
   "dependencies": {
     "lodash": "^4.17.21",
     "mitt": "^3.0.1",
