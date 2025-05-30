@@ -533,12 +533,24 @@ export default {
         const rate = flt(item.rate);
         sum += qty * rate;
       });
+      
       // Subtract additional discount
       const additional_discount = this.flt(this.additional_discount);
       sum -= additional_discount;
+      
       // Add delivery charges
       const delivery_charges = this.flt(this.delivery_charges_rate);
       sum += delivery_charges;
+      
+      // Add taxes
+      if (this.invoice_doc && this.invoice_doc.taxes) {
+        this.invoice_doc.taxes.forEach(tax => {
+          if (tax.tax_amount) {
+            sum += flt(tax.tax_amount);
+          }
+        });
+      }
+      
       return this.flt(sum, this.currency_precision);
     },
     // Calculate total discount amount for all items
@@ -689,14 +701,27 @@ export default {
       }
       let index = -1;
       if (!this.new_line) {
-        index = this.items.findIndex(
-          (el) =>
-            el.item_code === item.item_code &&
-            el.uom === item.uom &&
-            !el.posa_is_offer &&
-            !el.posa_is_replace &&
-            ((el.batch_no && item.batch_no && el.batch_no === item.batch_no) || (!el.batch_no && !item.batch_no))
-        );
+        // For auto_set_batch enabled, we should check if the item code and UOM match only
+        // For items with batch but auto_set_batch disabled, check if batch numbers match
+        // This will allow quantity to increment for batch items with auto_set_batch enabled
+        if (this.pos_profile.posa_auto_set_batch && item.has_batch_no) {
+          index = this.items.findIndex(
+            (el) =>
+              el.item_code === item.item_code &&
+              el.uom === item.uom &&
+              !el.posa_is_offer &&
+              !el.posa_is_replace
+          );
+        } else {
+          index = this.items.findIndex(
+            (el) =>
+              el.item_code === item.item_code &&
+              el.uom === item.uom &&
+              !el.posa_is_offer &&
+              !el.posa_is_replace &&
+              ((el.batch_no && item.batch_no && el.batch_no === item.batch_no) || (!el.batch_no && !item.batch_no))
+          );
+        }
       }
 
       let new_item;
@@ -782,6 +807,9 @@ export default {
       if (!item.posa_is_replace) {
         item.posa_is_replace = "";
       }
+      
+      // Initialize flag for tracking manual rate changes
+      new_item._manual_rate_set = false;
 
       // Set negative quantity for return invoices
       if (this.invoiceType === "Return" && item.qty > 0) {
@@ -793,7 +821,20 @@ export default {
       new_item.discount_percentage = 0;
       new_item.discount_amount_per_item = 0;
       new_item.price_list_rate = item.rate;
-      new_item.base_price_list_rate = item.rate; // Add base_price_list_rate
+      
+      // Setup base rates properly for multi-currency
+      if (this.selected_currency !== this.pos_profile.currency) {
+        // Store original base currency values
+        new_item.base_price_list_rate = item.rate * this.exchange_rate;
+        new_item.base_rate = item.rate * this.exchange_rate;
+        new_item.base_discount_amount = 0;
+      } else {
+        // In base currency, base rates = displayed rates
+        new_item.base_price_list_rate = item.rate;
+        new_item.base_rate = item.rate;
+        new_item.base_discount_amount = 0;
+      }
+      
       new_item.qty = item.qty;
       new_item.uom = item.uom ? item.uom : item.stock_uom;
       // Ensure item_uoms is initialized
@@ -1130,6 +1171,16 @@ export default {
       
       // Calculate grand total with correct sign for returns
       let grandTotal = this.subtotal;
+      
+      // Add taxes to grand total
+      if (this.invoice_doc && this.invoice_doc.taxes) {
+        this.invoice_doc.taxes.forEach(tax => {
+          if (tax.tax_amount) {
+            grandTotal += flt(tax.tax_amount);
+          }
+        });
+      }
+      
       if (isReturn && grandTotal > 0) grandTotal = -Math.abs(grandTotal);
       
       doc.grand_total = grandTotal;
@@ -1142,7 +1193,23 @@ export default {
       // Add POS specific fields
       doc.posa_pos_opening_shift = this.pos_opening_shift.name;
       doc.payments = this.get_payments();
+      
+      // Copy existing taxes if available
       doc.taxes = [];
+      if (this.invoice_doc && this.invoice_doc.taxes) {
+        doc.taxes = this.invoice_doc.taxes.map(tax => {
+          return {
+            account_head: tax.account_head,
+            charge_type: tax.charge_type || "On Net Total",
+            description: tax.description,
+            rate: tax.rate,
+            tax_amount: tax.tax_amount,
+            total: tax.total,
+            base_tax_amount: tax.tax_amount * (1 / this.exchange_rate || 1),
+            base_total: tax.total * (1 / this.exchange_rate || 1)
+          };
+        });
+      }
       
       // Handle return specific fields
       if (isReturn) {
@@ -1201,6 +1268,7 @@ export default {
       } else {
         // Same currency, just ensure negative values for returns
         const multiplier = isReturn ? -1 : 1;
+        // When in base currency, the base amounts are the same as the regular amounts
         doc.base_total = total * multiplier;
         doc.base_net_total = total * multiplier;
         doc.base_discount_amount = discountAmount * multiplier;
@@ -1324,10 +1392,12 @@ export default {
           // item.rate is in USD (e.g. 10 USD)
           // base_rate should be in PKR (e.g. 3000 PKR)
           new_item.rate = flt(item.rate);  // Keep rate in USD
-          new_item.base_rate = flt(item.rate * this.exchange_rate);  // Convert to PKR
+          
+          // Use pre-stored base_rate if available, otherwise calculate
+          new_item.base_rate = item.base_rate || flt(item.rate * this.exchange_rate);
           
           new_item.price_list_rate = flt(item.price_list_rate);  // Keep price list rate in USD
-          new_item.base_price_list_rate = flt(item.price_list_rate * this.exchange_rate);  // Convert to PKR
+          new_item.base_price_list_rate = item.base_price_list_rate || flt(item.price_list_rate * this.exchange_rate);
           
           // Calculate amounts
           new_item.amount = flt(item.qty) * new_item.rate;  // Amount in USD
@@ -1335,17 +1405,17 @@ export default {
           
           // Handle discount amount
           new_item.discount_amount = flt(item.discount_amount);  // Keep discount in USD
-          new_item.base_discount_amount = flt(item.discount_amount * this.exchange_rate);  // Convert to PKR
+          new_item.base_discount_amount = item.base_discount_amount || flt(item.discount_amount * this.exchange_rate);
         } else {
-          // Same currency (PKR), no conversion needed
+          // Same currency (base currency), make sure we use base rates if available
           new_item.rate = flt(item.rate);
-          new_item.base_rate = flt(item.rate);
+          new_item.base_rate = item.base_rate || flt(item.rate);
           new_item.price_list_rate = flt(item.price_list_rate);
-          new_item.base_price_list_rate = flt(item.price_list_rate);
+          new_item.base_price_list_rate = item.base_price_list_rate || flt(item.price_list_rate);
           new_item.amount = flt(item.qty) * new_item.rate;
           new_item.base_amount = new_item.amount;
           new_item.discount_amount = flt(item.discount_amount);
-          new_item.base_discount_amount = flt(item.discount_amount);
+          new_item.base_discount_amount = item.base_discount_amount || flt(item.discount_amount);
         }
 
         // For returns, ensure all amounts are negative
@@ -1893,11 +1963,11 @@ export default {
       }
       var vm = this;
       
-      // Only update rate if no offer is applied
-      if (item.price_list_rate && !item.posa_offer_applied) {
-        item.rate = item.price_list_rate;
-        this.$forceUpdate();
-      }
+      // Remove this block which was causing the issue - rates should persist regardless of currency
+      // if (item.price_list_rate && !item.posa_offer_applied) {
+      //   item.rate = item.price_list_rate;
+      //   this.$forceUpdate();
+      // }
 
       frappe.call({
         method: "posawesome.posawesome.api.posapp.get_item_detail",
@@ -1939,35 +2009,50 @@ export default {
               item.has_batch_no &&
               vm.pos_profile.posa_auto_set_batch &&
               !item.batch_no &&
-              data.batch_no_data
+              data.batch_no_data &&
+              data.batch_no_data.length > 0
             ) {
               item.batch_no_data = data.batch_no_data;
-              vm.set_batch_qty(item, item.batch_no, false);
+              // Pass null instead of undefined to avoid console warning
+              vm.set_batch_qty(item, null, false);
             }
             
-            // Always store base rates from server
-            item.base_price_list_rate = data.price_list_rate;
+            // First save base rates if not exists or if in default currency
+            if (!item.base_rate || vm.selected_currency === vm.pos_profile.currency) {
+              // Always store base rates from server in base currency
+              item.base_price_list_rate = data.price_list_rate;
+              
+              if (!item.posa_offer_applied) {
+                item.base_rate = data.price_list_rate;
+              }
+            }
             
             // Only update rates if no offer is applied
             if (!item.posa_offer_applied) {
-              item.base_rate = data.price_list_rate;
-              
               // Convert to selected currency if needed
               if (vm.selected_currency !== vm.pos_profile.currency) {
                 const exchange_rate = vm.exchange_rate || 1;
-                item.price_list_rate = vm.flt(data.price_list_rate / exchange_rate, vm.currency_precision);
-                item.rate = vm.flt(data.price_list_rate / exchange_rate, vm.currency_precision);
+                item.price_list_rate = vm.flt(item.base_price_list_rate / exchange_rate, vm.currency_precision);
+                
+                // In multi-currency mode, update the rate from base_rate
+                item.rate = vm.flt(item.base_rate / exchange_rate, vm.currency_precision);
               } else {
-                item.price_list_rate = data.price_list_rate;
-                item.rate = data.price_list_rate;
+                // When in default currency, use base rates directly for price_list_rate
+                item.price_list_rate = item.base_price_list_rate;
+                
+                // IMPORTANT: For default currency, only set rate if it's not already set
+                // This preserves manually entered rates
+                if (!item._manual_rate_set) {
+                  item.rate = item.base_rate;
+                }
               }
             } else {
               // For items with offers, only update price_list_rate
               if (vm.selected_currency !== vm.pos_profile.currency) {
                 const exchange_rate = vm.exchange_rate || 1;
-                item.price_list_rate = vm.flt(data.price_list_rate / exchange_rate, vm.currency_precision);
+                item.price_list_rate = vm.flt(item.base_price_list_rate / exchange_rate, vm.currency_precision);
               } else {
-                item.price_list_rate = data.price_list_rate;
+                item.price_list_rate = item.base_price_list_rate;
               }
             }
 
@@ -1989,7 +2074,13 @@ export default {
               // Calculate discount in selected currency
               const discount_amount = vm.flt((item.price_list_rate * discount_percent) / 100, vm.currency_precision);
               item.discount_amount = discount_amount;
+              
+              // Also store base discount amount
+              item.base_discount_amount = vm.flt((item.base_price_list_rate * discount_percent) / 100, vm.currency_precision);
+              
+              // Update rates with discount
               item.rate = vm.flt(item.price_list_rate - discount_amount, vm.currency_precision);
+              item.base_rate = vm.flt(item.base_price_list_rate - item.base_discount_amount, vm.currency_precision);
             }
             
             // Update other item details
@@ -2006,6 +2097,17 @@ export default {
             // Calculate final amount
             item.amount = vm.flt(item.qty * item.rate, vm.currency_precision);
             item.base_amount = vm.flt(item.qty * item.base_rate, vm.currency_precision);
+            
+            // Log updated rates for debugging
+            console.log(`Updated rates for ${item.item_code} on expand:`, {
+              base_rate: item.base_rate,
+              rate: item.rate,
+              base_price_list_rate: item.base_price_list_rate, 
+              price_list_rate: item.price_list_rate,
+              exchange_rate: vm.exchange_rate,
+              selected_currency: vm.selected_currency,
+              default_currency: vm.pos_profile.currency
+            });
             
             // Force update UI immediately
             vm.$forceUpdate();
@@ -2091,6 +2193,11 @@ export default {
       let newValue = flt(value, this.currency_precision);
 
       try {
+        // Flag to track manual rate changes
+        if (fieldId === 'rate') {
+          item._manual_rate_set = true;
+        }
+        
         // Handle negative values
         if (newValue < 0) {
           newValue = 0;
@@ -2193,6 +2300,12 @@ export default {
 
     // Calculate item price and discount fields
     calc_item_price(item) {
+      // Skip recalculation if called from update_item_rates to avoid double calculations
+      if (item._skip_calc) {
+        item._skip_calc = false;
+        return;
+      }
+      
       if (!item.posa_offer_applied) {
         if (item.price_list_rate) {
           // Always work with base rates first
@@ -2280,12 +2393,13 @@ export default {
       // Update rates based on new conversion factor
       if (item.posa_offer_applied) {
         // For items with offer, recalculate from original offer rate
-        const offer = this.posOffers.find(o => {
+        const offer = this.posOffers && Array.isArray(this.posOffers) ? this.posOffers.find(o => {
+          if (!o || !o.items) return false;
           const items = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
-          return items.includes(item.posa_row_id) && o.discount_type === 'Rate';
-        });
+          return Array.isArray(items) && items.includes(item.posa_row_id);
+        }) : null;
         
-        if (offer) {
+        if (offer && offer.discount_type === "Rate") {
           // Apply offer rate with new conversion factor
           const converted_rate = flt(offer.rate * item.conversion_factor);
           
@@ -2303,6 +2417,37 @@ export default {
           } else {
             item.rate = converted_rate;
             item.price_list_rate = converted_rate;
+          }
+        } else if (offer && offer.discount_type === "Discount Percentage") {
+          // For percentage discount, recalculate from original price but with new conversion factor
+          
+          // Update the base prices with new conversion factor
+          let updated_base_price;
+          if (item.original_base_price_list_rate) {
+            // Use original price adjusted for new conversion factor
+            updated_base_price = this.flt(item.original_base_price_list_rate * item.conversion_factor, this.currency_precision);
+          } else {
+            // Fallback if original price not stored
+            updated_base_price = this.flt(item.base_price_list_rate * conversion_ratio, this.currency_precision);
+          }
+          
+          // Store updated base price
+          item.base_price_list_rate = updated_base_price;
+          
+          // Recalculate discount based on percentage
+          const base_discount = this.flt((updated_base_price * offer.discount_percentage) / 100, this.currency_precision);
+          item.base_discount_amount = base_discount;
+          item.base_rate = this.flt(updated_base_price - base_discount, this.currency_precision);
+          
+          // Convert to selected currency if needed
+          if (this.selected_currency !== this.pos_profile.currency) {
+            item.price_list_rate = this.flt(updated_base_price / this.exchange_rate, this.currency_precision);
+            item.discount_amount = this.flt(base_discount / this.exchange_rate, this.currency_precision);
+            item.rate = this.flt(item.base_rate / this.exchange_rate, this.currency_precision);
+          } else {
+            item.price_list_rate = updated_base_price;
+            item.discount_amount = base_discount;
+            item.rate = item.base_rate;
           }
         }
       } else {
@@ -3142,21 +3287,32 @@ export default {
 
     ApplyOnPrice(offer) {
       console.log('Applying price offer:', offer);
+      if (!offer || !Array.isArray(this.items)) return;
+      
       this.items.forEach((item) => {
+        // Check if offer.items exists and is valid
+        if (!item || !offer.items || !Array.isArray(offer.items)) return;
+        
         if (offer.items.includes(item.posa_row_id)) {
-          const item_offers = JSON.parse(item.posa_offers);
+          // Ensure posa_offers is initialized and valid
+          const item_offers = item.posa_offers ? JSON.parse(item.posa_offers) : [];
+          if (!Array.isArray(item_offers)) return;
+          
           if (!item_offers.includes(offer.row_id)) {
             // Store original rates only if this is the first offer being applied
             if (!item.posa_offer_applied) {
-              item.original_base_rate = item.base_rate;
-              item.original_base_price_list_rate = item.base_price_list_rate;
-              item.original_rate = item.rate;
-              item.original_price_list_rate = item.price_list_rate;
-              console.log('Storing original rates:', {
+              // Store original prices normalized to conversion factor 1
+              const cf = flt(item.conversion_factor || 1);
+              item.original_base_rate = item.base_rate / cf;
+              item.original_base_price_list_rate = item.base_price_list_rate / cf;
+              item.original_rate = item.rate / cf;
+              item.original_price_list_rate = item.price_list_rate / cf;
+              console.log('Storing original rates (normalized to conversion factor 1):', {
                 original_base_rate: item.original_base_rate,
                 original_base_price_list_rate: item.original_base_price_list_rate,
                 original_rate: item.original_rate,
-                original_price_list_rate: item.original_price_list_rate
+                original_price_list_rate: item.original_price_list_rate,
+                conversion_factor: cf
               });
             }
 
@@ -3190,14 +3346,18 @@ export default {
               item.discount_percentage = offer.discount_percentage;
               
               // Calculate discount in base currency first
-              const base_price = item.original_base_price_list_rate || item.base_price_list_rate;
+              // Use normalized price * current conversion factor
+              const base_price = this.flt(
+                (item.original_base_price_list_rate || (item.base_price_list_rate / conversion_factor)) * conversion_factor,
+                this.currency_precision
+              );
               const base_discount = this.flt((base_price * offer.discount_percentage) / 100, this.currency_precision);
               item.base_discount_amount = base_discount;
               item.base_rate = this.flt(base_price - base_discount, this.currency_precision);
+              item.base_price_list_rate = base_price;
 
               // Convert to selected currency if needed
               if (this.selected_currency !== this.pos_profile.currency) {
-                const original_price = item.original_price_list_rate || item.price_list_rate;
                 item.price_list_rate = this.flt(base_price / this.exchange_rate, this.currency_precision);
                 item.discount_amount = this.flt(base_discount / this.exchange_rate, this.currency_precision);
                 item.rate = this.flt(item.base_rate / this.exchange_rate, this.currency_precision);
@@ -3232,62 +3392,89 @@ export default {
 
     RemoveOnPrice(offer) {
       console.log('Removing price offer:', offer);
+      if (!offer || !Array.isArray(this.items)) return;
+      
       this.items.forEach((item) => {
-        const item_offers = JSON.parse(item.posa_offers);
-        if (item_offers.includes(offer.row_id)) {
-          console.log('Found item with offer:', item);
+        if (!item || !item.posa_offers) return;
+        
+        try {
+          const item_offers = JSON.parse(item.posa_offers);
+          if (!Array.isArray(item_offers)) return;
           
-          // Check if we have original rates stored
-          if (!item.original_base_rate) {
-            console.warn('Original rates not found, fetching from server');
-            this.update_item_detail(item);
-            return;
+          if (item_offers.includes(offer.row_id)) {
+            console.log('Found item with offer:', item);
+            
+            // Check if we have original rates stored
+            if (!item.original_base_rate) {
+              console.warn('Original rates not found, fetching from server');
+              this.update_item_detail(item);
+              return;
+            }
+
+            // Get current conversion factor
+            const cf = flt(item.conversion_factor || 1);
+            
+            console.log('Restoring original rates with conversion factor:', {
+              original_base_rate: item.original_base_rate,
+              original_base_price_list_rate: item.original_base_price_list_rate,
+              conversion_factor: cf
+            });
+
+            // Restore original rates adjusted for current conversion factor
+            item.base_rate = this.flt(item.original_base_rate * cf, this.currency_precision);
+            item.base_price_list_rate = this.flt(item.original_base_price_list_rate * cf, this.currency_precision);
+            
+            // Convert to selected currency
+            if (this.selected_currency !== this.pos_profile.currency) {
+              item.rate = this.flt(item.base_rate / this.exchange_rate, this.currency_precision);
+              item.price_list_rate = this.flt(item.base_price_list_rate / this.exchange_rate, this.currency_precision);
+            } else {
+              item.rate = item.base_rate;
+              item.price_list_rate = item.base_price_list_rate;
+            }
+
+            // Reset all discounts
+            item.discount_percentage = 0;
+            item.discount_amount = 0;
+            item.base_discount_amount = 0;
+
+            // Recalculate amounts
+            item.amount = this.flt(item.qty * item.rate, this.currency_precision);
+            item.base_amount = this.flt(item.qty * item.base_rate, this.currency_precision);
+
+            // Only clear original rates if no other offers are applied
+            const remaining_offers = item_offers.filter(id => id !== offer.row_id);
+            if (remaining_offers.length === 0) {
+              item.original_base_rate = null;
+              item.original_base_price_list_rate = null;
+              item.original_rate = null;
+              item.original_price_list_rate = null;
+              item.posa_offer_applied = 0;
+            }
+
+            // Update posa_offers
+            item.posa_offers = JSON.stringify(remaining_offers);
+
+            console.log('Updated rates after removing offer:', {
+              rate: item.rate,
+              base_rate: item.base_rate,
+              price_list_rate: item.price_list_rate,
+              base_price_list_rate: item.base_price_list_rate,
+              amount: item.amount,
+              base_amount: item.base_amount,
+              remaining_offers: remaining_offers
+            });
+
+            // Force UI update
+            this.$forceUpdate();
           }
-
-          console.log('Restoring original rates:', {
-            original_base_rate: item.original_base_rate,
-            original_base_price_list_rate: item.original_base_price_list_rate,
-            original_rate: item.original_rate,
-            original_price_list_rate: item.original_price_list_rate
+        } catch (error) {
+          console.error('Error removing price offer:', error);
+          this.eventBus.emit("show_message", {
+            title: __("Error removing price offer"),
+            color: "error",
+            message: error.message
           });
-
-          // Restore original rates exactly as they were
-          item.base_rate = item.original_base_rate;
-          item.base_price_list_rate = item.original_base_price_list_rate;
-          item.rate = item.original_rate;
-          item.price_list_rate = item.original_price_list_rate;
-
-          // Reset all discounts
-          item.discount_percentage = 0;
-          item.discount_amount = 0;
-          item.base_discount_amount = 0;
-
-          // Recalculate amounts
-          item.amount = this.flt(item.qty * item.rate, this.currency_precision);
-          item.base_amount = this.flt(item.qty * item.base_rate, this.currency_precision);
-
-          // Only clear original rates if no other offers are applied
-          const remaining_offers = item_offers.filter(id => id !== offer.row_id);
-          if (remaining_offers.length === 0) {
-            item.original_base_rate = null;
-            item.original_base_price_list_rate = null;
-            item.original_rate = null;
-            item.original_price_list_rate = null;
-            item.posa_offer_applied = 0;
-          }
-
-          console.log('Updated rates after removing offer:', {
-            rate: item.rate,
-            base_rate: item.base_rate,
-            price_list_rate: item.price_list_rate,
-            base_price_list_rate: item.base_price_list_rate,
-            amount: item.amount,
-            base_amount: item.base_amount,
-            remaining_offers: remaining_offers
-          });
-
-          // Force UI update
-          this.$forceUpdate();
         }
       });
     },
@@ -3321,39 +3508,73 @@ export default {
     },
 
     addOfferToItems(offer) {
-      const offer_items = JSON.parse(offer.items);
-      offer_items.forEach((el) => {
-        this.items.forEach((exist_item) => {
-          if (exist_item.posa_row_id == el) {
-            const item_offers = JSON.parse(exist_item.posa_offers);
-            if (!item_offers.includes(offer.row_id)) {
-              item_offers.push(offer.row_id);
-              if (offer.offer === "Item Price") {
-                exist_item.posa_offer_applied = 1;
+      if (!offer || !offer.items || !Array.isArray(this.items)) return;
+      
+      try {
+        const offer_items = typeof offer.items === 'string' ? JSON.parse(offer.items) : offer.items;
+        if (!Array.isArray(offer_items)) return;
+        
+        offer_items.forEach((el) => {
+          this.items.forEach((exist_item) => {
+            if (!exist_item || !exist_item.posa_row_id) return;
+            
+            if (exist_item.posa_row_id == el) {
+              const item_offers = exist_item.posa_offers ? JSON.parse(exist_item.posa_offers) : [];
+              if (!Array.isArray(item_offers)) return;
+              
+              if (!item_offers.includes(offer.row_id)) {
+                item_offers.push(offer.row_id);
+                if (offer.offer === "Item Price") {
+                  exist_item.posa_offer_applied = 1;
+                }
               }
+              exist_item.posa_offers = JSON.stringify(item_offers);
             }
-            exist_item.posa_offers = JSON.stringify(item_offers);
-          }
+          });
         });
-      });
+      } catch (error) {
+        console.error('Error adding offer to items:', error);
+        this.eventBus.emit("show_message", {
+          title: __("Error adding offer to items"),
+          color: "error",
+          message: error.message
+        });
+      }
     },
 
     deleteOfferFromItems(offer) {
-      const offer_items = JSON.parse(offer.items);
-      offer_items.forEach((el) => {
-        this.items.forEach((exist_item) => {
-          if (exist_item.posa_row_id == el) {
-            const item_offers = JSON.parse(exist_item.posa_offers);
-            const updated_item_offers = item_offers.filter(
-              (row_id) => row_id != offer.row_id
-            );
-            if (offer.offer === "Item Price") {
-              exist_item.posa_offer_applied = 0;
+      if (!offer || !offer.items || !Array.isArray(this.items)) return;
+      
+      try {
+        const offer_items = typeof offer.items === 'string' ? JSON.parse(offer.items) : offer.items;
+        if (!Array.isArray(offer_items)) return;
+        
+        offer_items.forEach((el) => {
+          this.items.forEach((exist_item) => {
+            if (!exist_item || !exist_item.posa_row_id) return;
+            
+            if (exist_item.posa_row_id == el) {
+              const item_offers = exist_item.posa_offers ? JSON.parse(exist_item.posa_offers) : [];
+              if (!Array.isArray(item_offers)) return;
+              
+              const updated_item_offers = item_offers.filter(
+                (row_id) => row_id != offer.row_id
+              );
+              if (offer.offer === "Item Price") {
+                exist_item.posa_offer_applied = 0;
+              }
+              exist_item.posa_offers = JSON.stringify(updated_item_offers);
             }
-            exist_item.posa_offers = JSON.stringify(updated_item_offers);
-          }
+          });
         });
-      });
+      } catch (error) {
+        console.error('Error deleting offer from items:', error);
+        this.eventBus.emit("show_message", {
+          title: __("Error deleting offer from items"),
+          color: "error",
+          message: error.message
+        });
+      }
     },
 
     validate_due_date(item) {
@@ -3552,12 +3773,38 @@ export default {
           currency: currency,
           exchange_rate: 1
         });
+        
+        // First ensure base rates exist for all items
+        this.items.forEach(item => {
+          if (!item.base_rate) {
+            item.base_rate = item.rate;
+            item.base_price_list_rate = item.price_list_rate;
+            item.base_discount_amount = item.discount_amount || 0;
+          }
+        });
+        
+        // Then update all item rates
+        this.update_item_rates();
         return;
       }
       
       try {
         console.log('Updating currency exchange rate...');
         console.log('Selected:', currency, 'Base:', this.pos_profile.currency, 'Date:', this.posting_date);
+        
+        // First ensure base rates exist for all items
+        this.items.forEach(item => {
+          if (!item.base_rate) {
+            // Store original rates in base currency before switching
+            item.base_rate = item.rate;
+            item.base_price_list_rate = item.price_list_rate;
+            item.base_discount_amount = item.discount_amount || 0;
+            console.log(`Stored base rates for ${item.item_code}:`, {
+              base_rate: item.base_rate,
+              base_price_list_rate: item.base_price_list_rate
+            });
+          }
+        });
         
         // Get rate from selected to base currency
         const response = await frappe.call({
@@ -3588,9 +3835,12 @@ export default {
             this.available_currencies[currencyIndex].rate = rate;
           }
           
-          // Update all item rates based on new exchange rate
+          // Force update of all items immediately
           this.update_item_rates();
-
+          
+          // Log updated items for debugging
+          console.log(`Updated all ${this.items.length} items to currency ${currency} with rate ${rate}`);
+          
           // Show success message
           this.eventBus.emit("show_message", {
             title: __(`Exchange rate updated: 1 ${currency} = ${this.flt(rate, 6)} ${this.pos_profile.currency}`),
@@ -3618,6 +3868,9 @@ export default {
           this.available_currencies[currencyIndex].rate = null;
         }
         
+        // Restore all items to base currency rates
+        this.update_item_rates();
+        
         this.eventBus.emit("show_message", {
           title: __(`Error: Could not fetch exchange rate from ${currency} to ${this.pos_profile.currency}. Please set up the exchange rate first.`),
           color: "error"
@@ -3643,15 +3896,36 @@ export default {
       console.log('Updating item rates with exchange rate:', this.exchange_rate);
 
       this.items.forEach(item => {
-        // Store original rates if not already stored
+        // Set skip flag to avoid double calculations
+        item._skip_calc = true;
+        
+        // First ensure base rates exist for all items
         if (!item.base_rate) {
-          item.base_rate = item.rate;
-          item.base_price_list_rate = item.price_list_rate;
-          item.base_discount_amount = item.discount_amount;
+          console.log(`Setting base rates for ${item.item_code} for the first time`);
+          if (this.selected_currency === this.pos_profile.currency) {
+            // When in base currency, base rates = displayed rates
+            item.base_rate = item.rate;
+            item.base_price_list_rate = item.price_list_rate;
+            item.base_discount_amount = item.discount_amount || 0;
+          } else {
+            // When in another currency, calculate base rates
+            item.base_rate = item.rate * this.exchange_rate;
+            item.base_price_list_rate = item.price_list_rate * this.exchange_rate;
+            item.base_discount_amount = (item.discount_amount || 0) * this.exchange_rate;
+          }
         }
 
-        // Convert all monetary values to selected currency
-        if (this.selected_currency !== this.pos_profile.currency) {
+        // Currency conversion logic
+        if (this.selected_currency === this.pos_profile.currency) {
+          // When switching back to default currency, restore from base rates
+          console.log(`Restoring rates for ${item.item_code} from base rates`);
+          item.price_list_rate = item.base_price_list_rate;
+          item.rate = item.base_rate;
+          item.discount_amount = item.base_discount_amount;
+        } else {
+          // When switching to another currency, convert from base rates
+          console.log(`Converting rates for ${item.item_code} to ${this.selected_currency}`);
+          
           // If exchange rate is 285 PKR = 1 USD
           // To convert PKR to USD: divide by exchange rate
           // Example: 100 PKR / 285 = 0.35 USD
@@ -3663,22 +3937,29 @@ export default {
           item.price_list_rate = converted_price < 0.000001 ? 0 : converted_price;
           item.rate = converted_rate < 0.000001 ? 0 : converted_rate;
           item.discount_amount = converted_discount < 0.000001 ? 0 : converted_discount;
-
-          console.log(`Converted rates for ${item.item_code}:`, {
-            base_rate: item.base_rate,
-            converted_rate: item.rate,
-            exchange_rate: this.exchange_rate,
-            precision: this.currency_precision
-          });
-        } else {
-          // Restore base currency values
-          item.price_list_rate = item.base_price_list_rate;
-          item.rate = item.base_rate;
-          item.discount_amount = item.base_discount_amount;
         }
+        
+        // Always recalculate final amounts
+        item.amount = this.flt(item.qty * item.rate, this.currency_precision);
+        item.base_amount = this.flt(item.qty * item.base_rate, this.currency_precision);
 
+        console.log(`Updated rates for ${item.item_code}:`, {
+          price_list_rate: item.price_list_rate,
+          base_price_list_rate: item.base_price_list_rate,
+          rate: item.rate,
+          base_rate: item.base_rate,
+          discount: item.discount_amount,
+          base_discount: item.base_discount_amount,
+          amount: item.amount,
+          base_amount: item.base_amount,
+        });
+
+        // Apply any other pricing rules if needed
         this.calc_item_price(item);
       });
+      
+      // Force UI update after all calculations
+      this.$forceUpdate();
     },
 
     formatCurrency(value) {

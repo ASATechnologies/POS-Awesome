@@ -25,7 +25,7 @@
   "valid_upto",
   "maximum_use",
   "used",
-  "one\u0640use",
+  "one_use",
   "column_break_11",
   "description"
  ],
@@ -136,7 +136,7 @@
   },
   {
    "default": "0",
-   "fieldname": "one\u0640use",
+   "fieldname": "one_use",
    "fieldtype": "Check",
    "label": "Only One Use Per Customer"
   },
