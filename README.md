@@ -11,10 +11,9 @@
 
 1. Supports Erpnext Version 15
 2. Supports Multi-Currency Transactions.
-    Customers can be invoiced in different currencies
-    Exchange Rate is fetched automatically based on selected currency
-    Invoices made with posawesome display Grand Total in both base and selected currency in erpnext.
-    
+   Customers can be invoiced in different currencies
+   Exchange Rate is fetched automatically based on selected currency
+   Invoices made with posawesome display Grand Total in both base and selected currency in erpnext.
 3. User-friendly and provides a good user experience and speed of use
 4. The cashier can either use list view or card view during sales transactions. Card view shows the images of the items
 5. Supports enqueue invoice submission after printing the receipt for faster processing
