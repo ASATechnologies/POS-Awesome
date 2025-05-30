@@ -87,6 +87,7 @@ export default {
             this.get_offers(this.pos_profile.name);
             this.eventBus.emit('register_pos_profile', r.message);
             this.eventBus.emit('set_company', r.message.company);
+            frappe.realtime.emit('pos_profile_registered');
             console.info('LoadPosProfile');
           } else {
             this.create_opening_voucher();
@@ -189,13 +190,13 @@ export default {
     });
   },
   beforeUnmount() {
-    evntBus.$off('close_opening_dialog');
-    evntBus.$off('register_pos_data');
-    evntBus.$off('LoadPosProfile');
-    evntBus.$off('show_offers');
-    evntBus.$off('show_coupons');
-    evntBus.$off('open_closing_dialog');
-    evntBus.$off('submit_closing_pos');
+    this.eventBus.off('close_opening_dialog');
+    this.eventBus.off('register_pos_data');
+    this.eventBus.off('LoadPosProfile');
+    this.eventBus.off('show_offers');
+    this.eventBus.off('show_coupons');
+    this.eventBus.off('open_closing_dialog');
+    this.eventBus.off('submit_closing_pos');
   },
 };
 </script>

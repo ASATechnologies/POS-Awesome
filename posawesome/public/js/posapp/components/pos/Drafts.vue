@@ -113,5 +113,8 @@ export default {
       this.dialog_data = data;
     });
   },
+  beforeUnmount() {
+    this.eventBus.off('open_drafts');
+  },
 };
 </script>

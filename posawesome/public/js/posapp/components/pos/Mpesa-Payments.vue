@@ -145,7 +145,7 @@ export default {
     });
   },
   beforeUnmount() {
-    evntBus.$off('open_mpesa_payments');
+    this.eventBus.off('open_mpesa_payments');
   },
 };
 </script>

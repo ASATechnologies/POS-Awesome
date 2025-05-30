@@ -125,5 +125,8 @@ export default {
       });
     });
   },
+  beforeUnmount() {
+    this.eventBus.off('open_variants_model');
+  },
 };
 </script>

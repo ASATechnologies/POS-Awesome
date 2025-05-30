@@ -175,6 +175,7 @@ fixtures = [
                     "Batch-posa_batch_price",
                     "POS Profile-posa_max_discount_allowed",
                     "POS Profile-posa_allow_return",
+                    "POS Profile-posa_allow_return_without_invoice",
                     "POS Profile-posa_col_1",
                     "POS Profile-posa_scale_barcode_start",
                     "Sales Invoice-posa_is_printed",
@@ -264,4 +265,16 @@ fixtures = [
         "doctype": "Property Setter",
         "filters": [["name", "in", ("Sales Invoice-posa_pos_opening_shift-no_copy")]],
     },
+    {
+        "doctype": "Custom Field",
+        "filters": [
+            [
+                "name",
+                "in",
+                [
+                    "POS Profile-posa_allow_multi_currency"
+                ]
+            ]
+        ]
+    }
 ]

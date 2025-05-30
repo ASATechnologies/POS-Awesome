@@ -123,7 +123,7 @@ def check_coupon_code(coupon_code, customer=None, company=None):
         res["msg"] = _("Sorry, this coupon code cannot be used by this company")
         return res
 
-    if customer and coupon.oneـuse:
+    if customer and coupon.one_use:
         count = frappe.db.count(
             "POS Coupon Detail",
             filters={

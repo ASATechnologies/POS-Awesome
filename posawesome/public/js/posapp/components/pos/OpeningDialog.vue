@@ -161,10 +161,11 @@ export default {
       location.reload();
     },
   },
-  created: function () {
-    this.$nextTick(function () {
-      this.get_opening_dialog_data();
-    });
+  mounted: function () {
+    this.get_opening_dialog_data();
+  },
+  beforeUnmount() {
+    // Clean up event listeners if any were added
   },
 };
 </script>

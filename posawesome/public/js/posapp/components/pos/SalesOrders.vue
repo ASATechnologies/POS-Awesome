@@ -190,5 +190,9 @@ export default {
       this.pos_profile = data.pos_profile;
     });
   },
+  beforeUnmount() {
+    this.eventBus.off("open_orders");
+    this.eventBus.off("register_pos_profile");
+  },
 };
 </script>

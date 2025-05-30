@@ -2,7 +2,7 @@
 from __future__ import unicode_literals
 import frappe
 
-__version__ = "6.3.0"
+__version__ = "15.2.3"
 
 
 def console(*data):
