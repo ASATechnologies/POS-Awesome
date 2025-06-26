@@ -1,3 +1,6 @@
+# Warning: This is no longer maintained!
+### The new active maintained version can be found here: [https://github.com/defendicon/POS-Awesome-V15](https://github.com/defendicon/POS-Awesome-V15)
+
 <div align="center">
     <img src="https://frappecloud.com/files/pos.png" height="128">
     <h2>POS AWESOME</h2>
